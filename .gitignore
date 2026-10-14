@@ -9,3 +9,4 @@ wheels/
 # Virtual environments
 .venv
 ./SmolLM2-135M/
+.python-version
