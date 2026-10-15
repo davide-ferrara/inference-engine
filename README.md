@@ -15,9 +15,6 @@ git lfs pull
 `
 ## Run
 
-```
 ```bash
 uv run main.py
-```
-```
 ```
