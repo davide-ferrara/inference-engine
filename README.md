@@ -1,8 +1,8 @@
 # Inference Engine for SmolLM2-135M
 
-!> [!NOTE]
+> [!NOTE]
 > This repo is written only by HUMAN and have no AI into it simply to allow me to learn how to make
-a basic inference engine.
+a basic inference engine. This is very early stage.
 
 ## Try it yourself
 
@@ -13,3 +13,9 @@ git clone https://huggingface.co/HuggingFaceTB/SmolLM2-135M
 git lfs install
 git lfs pull
 `
+## Run
+
+`bash
+` uv run main.py
+```
+```

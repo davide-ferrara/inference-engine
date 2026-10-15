@@ -2,7 +2,6 @@ import json
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import ArrayLike
 
 
 @dataclass
@@ -12,7 +11,7 @@ class TensorMetadata:
     data_offsets: list
 
 
-class TensorLoader:
+class SafeTensor:
     def __init__(self, model_path):
         self.model_path: str = model_path
         self.model: bytes = self.load()
@@ -21,8 +20,15 @@ class TensorLoader:
         self.data: bytes = self.model[self.hdr_size :]
 
     def load(self) -> bytes:
-        with open(self.model_path, mode="rb") as model:
-            return model.read()
+        try:
+            with open(self.model_path, mode="rb") as model:
+                return model.read()
+        except OSError as err:
+            print("OS error:", err)
+            return bytes(0)
+        except ValueError:
+            print("Could not convert data to an integer.")
+            return bytes(0)
 
     # Header Size = 30530
     # 00007740  7d 7d 20 20 20 20 20 20  f1 bd e4 3c 45 3d 02 bc  |}}      ...<E=..|
@@ -36,47 +42,56 @@ class TensorLoader:
         with open("model.json", mode="w") as file:
             file.write(json.dumps(self.hdr, indent=4))
 
-    def get_header_data(self, key: str) -> TensorMetadata:
+    def get_hdr_data(self, key: str) -> TensorMetadata:
         dtype = self.hdr[key]["dtype"]
         shape = self.hdr[key]["shape"]
         offset = self.hdr[key]["data_offsets"]
         return TensorMetadata(dtype, shape, offset)
 
-    def from_bf16_buffer(self, metadata: TensorMetadata) -> ArrayLike:
-        buf = np.frombuffer(
+    # From BF16 buffer
+    def frombuffer(self, name: str) -> np.ndarray:
+        metadata: TensorMetadata = self.get_hdr_data(name)
+        buf_bf16 = np.frombuffer(
             self.data[metadata.data_offsets[0] : metadata.data_offsets[1]],
             dtype=np.uint16,
         ).astype(np.uint32)
-        return np.left_shift(buf, 16).view(np.float32).reshape(metadata.shape)
-
-    def get_embed(self) -> ArrayLike:
-        return self.from_bf16_buffer(self.get_header_data("model.embed_tokens.weight"))
-
-    def get_input_layernorm(self) -> ArrayLike:
-        return self.from_bf16_buffer(
-            self.get_header_data("model.layers.0.input_layernorm.weight")
-        )
+        return np.left_shift(buf_bf16, 16).view(np.float32).reshape(metadata.shape)
 
 
-class Tensor:
-    def __init__(self, model_path: str):
-        self.loader: TensorLoader = TensorLoader(model_path)
-        self.eps = 1e-5
-
-    def mean_square_root(self, a: ArrayLike, gamma: ArrayLike) -> ArrayLike:
-        msr = np.sqrt((np.sum(np.power(a, 2)) / np.size(a)) + self.eps)
-        return np.divide(a, msr) * gamma
-
-    def cosine_sim(self, a: ArrayLike, b: ArrayLike) -> np.float32:
-        return np.float32((np.dot(a, b)) / (np.linalg.norm(a) * np.linalg.norm(b)))
-
-    def get_embed(self):
-        return self.loader.get_embed()
+def rms_norm(a: np.ndarray, weights: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+    msr = np.sqrt(np.mean(np.square(a)) + eps)
+    return (a / msr) * weights
 
 
 def main():
-    t = Tensor("./SmolLM2-135M/model.safetensors")
-    print(t)
+    # 1.Loading
+    safetensor = SafeTensor("./SmolLM2-135M/model.safetensors")
+    embed = safetensor.frombuffer("model.embed_tokens.weight")
+    input_layernorm = safetensor.frombuffer("model.layers.0.input_layernorm.weight")
+
+    # 2. Input
+    x = embed[11265]  # Hello token
+    x_norm = rms_norm(x, input_layernorm)
+    self_attn_q_proj = safetensor.frombuffer("model.layers.0.self_attn.q_proj.weight")
+    q = self_attn_q_proj @ x_norm
+
+    # 3. Key Value Projection
+    self_attn_k = safetensor.frombuffer("model.layers.0.self_attn.k_proj.weight")
+    self_attn_v = safetensor.frombuffer("model.layers.0.self_attn.v_proj.weight")
+
+    k = self_attn_k @ x_norm
+    v = self_attn_v @ x_norm
+
+    print(q.shape, k.shape, v.shape)
+
+    # 4. Reshape
+    q = q.reshape(9, 64)
+    k = k.reshape(3, 64)
+    v = v.reshape(3, 64)
+
+    print(q.shape, k.shape, v.shape)
+
+    # 5. RoPe
 
 
 if __name__ == "__main__":

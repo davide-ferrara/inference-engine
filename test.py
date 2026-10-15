@@ -1,7 +1,8 @@
+import math
 import unittest
+
 import numpy as np
 
-from main import cosine_sim, mean_square_root
 
 class Test(unittest.TestCase):
     def test_bf16_to_f32(self):
@@ -11,15 +12,22 @@ class Test(unittest.TestCase):
         n = n.view(np.float32)
         self.assertEqual(n, 1.0)
 
-    def test_cosine_sim(self):
-        a = np.array([1.0, 1.0, 1.0])
-        self.assertEqual(cosine_sim(a, a), 1.0)
-        self.assertEqual(cosine_sim(a, -a), -1.0)
+    def test_rope(self):
+        # Test with even len(a)
+        theta = math.radians(90)
+        a = np.array([1, 2, 3, 4])
+        split = int(len(a) / 2)
+        x = a[:split]
+        y = a[split:]
 
-    def test_msr(self):
-        exp = np.array([0.46291005, 0.9258201, 1.38873015])
-        res = mean_square_root(np.array([2, 4, 6]))
-        self.assertEqual(res.all(), exp.all())
+        x_prime = np.zeros(split)
+        y_prime = np.zeros(split)
+        for i in range(len(x_prime)):
+            x_prime[i] = (x[i] * math.cos(theta)) - (y[i] * math.sin(theta))
+        for i in range(len(y_prime)):
+            y_prime[i] = (x[i] * math.sin(theta)) + (y[i] * math.cos(theta))
+
+        print(np.concatenate((x_prime, y_prime)))
 
 
 if __name__ == "__main__":
